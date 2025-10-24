@@ -1,3 +1,6 @@
+'use client'
+
+import { useRouter } from "next/navigation"
 import { JSX } from "react"
 import { BsArrowLeft, BsArrowRight, BsScissors } from "react-icons/bs"
 import { FaArrowAltCircleRight } from "react-icons/fa"
@@ -7,16 +10,21 @@ interface BasicComponentInterface {
     subHeading: string,
     color: string,
     mainIcon: JSX.Element,
-    subIcon?: JSX.Element
+    subIcon?: JSX.Element,
+    link: string
 }
 
 const BasicComponent = ({ ...props }: BasicComponentInterface) => {
 
     // props
-    const { heading, subHeading, color, mainIcon, subIcon } = props
+    const { heading, subHeading, color, mainIcon, subIcon, link } = props
 
+    // router
+    const router = useRouter()
     return <div
-        className={`flex flex-row bg-blue-200 p-8 text-white bg-gradient-to-l from-black to ${color} w-full mr-8 rounded-2xl cursor-pointer hover:scale-105 duration-500`}>
+        className={`flex flex-row bg-blue-200 p-8 text-white bg-gradient-to-l from-black to ${color} w-full mr-8 rounded-2xl cursor-pointer hover:scale-105 duration-500`}
+        onClick={() => router.push(link)}
+        >
         <span
             className="flex flex-col w-2/3">
             <span
@@ -48,20 +56,23 @@ export const BasicVideoFunctions = () => {
             subheading: "Convert video files to different formats",
             color: "bg-blue-400",
             mainIcon: <BsArrowRight size={24} />,
-            subIcon: <BsArrowLeft size={24} />
+            subIcon: <BsArrowLeft size={24} />,
+            link: '/convert/video'
         },
         {
             heading: "Convert Audio",
             subheading: "Convert audio files to different formats",
             color: "bg-orange-400",
             mainIcon: <BsArrowRight size={24} />,
-            subIcon: <BsArrowLeft size={24} />
+            subIcon: <BsArrowLeft size={24} />,
+            link:'/convert/audio'
         },
         {
             heading: "Trim Video",
             subheading: "Clip video into segments",
             color: "bg-violet-400",
             mainIcon: <BsScissors size={24} />,
+            link:'/trim/video'
             // subIcon: <BsArrowLeft size={24} />
         }
     ]
@@ -76,6 +87,7 @@ export const BasicVideoFunctions = () => {
                     mainIcon={item.mainIcon}
                     subIcon={item.subIcon}
                     key={index}
+                    link={item.link}
                 />
             })
         }
