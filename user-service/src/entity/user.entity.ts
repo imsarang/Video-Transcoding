@@ -19,27 +19,27 @@ export class User {
     @Column({nullable: false, name: 'password'})
     password: string
 
-    @Column({nullable: false, name: 'role', default: UserRole.USER, enum: UserRole})
+    @Column({ type: 'enum', enum: UserRole, nullable: false, name: 'role', default: UserRole.USER })
     role: UserRole
 
-    @Column({nullable: false, name: 'is_verified', default: false})
+    @Column({ type: 'boolean', nullable: false, name: 'is_verified', default: false })
     isVerified: boolean
 
-    @Column({name: 'firstname'})
-    firstName: string | null
+    @Column({ type: 'varchar', name: 'firstname', nullable: true })
+    firstName: string
 
-    @Column({name: 'lastname'})
-    lastName: string | null
+    @Column({ type: 'varchar', name: 'lastname', nullable: true })
+    lastName: string
 
-    @Column({name: 'phone_number'})
-    phoneNumber: string | null
+    @Column({ type: 'varchar', name: 'phone_number', nullable: true })
+    phoneNumber: string
 
-    @Column({name: 'profile_image'})
-    profileImage: string | null
+    @Column({ type: 'varchar', name: 'profile_image', nullable: true })
+    profileImage: string
 
-    @Column({nullable: false, name: 'created_at', default: Date.now()})
+    @Column({ type: 'timestamp', nullable: false, name: 'created_at', default: () => 'CURRENT_TIMESTAMP' })
     createdAt: Date
 
-    @Column({nullable: true, name: 'updated_at', default: Date.now()})
-    updatedAt: Date | null
+    @Column({ type: 'timestamp', nullable: true, name: 'updated_at', default: null })
+    updatedAt: Date
 }

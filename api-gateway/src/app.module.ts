@@ -5,13 +5,15 @@ import { PinoLoggerModule } from './modules/logger.module';
 import { CorsModule } from './modules/cors.module';
 import { RateLimiterModule } from './modules/rate-limiter.module';
 import { AuthModule } from './modules/auth.module';
+import { UserModule } from './modules/user.module';
 
 @Module({
   imports: [
     PinoLoggerModule,
     CorsModule,
     RateLimiterModule,
-    AuthModule
+    AuthModule,
+    UserModule
   ],
   controllers: [AppController],
   providers: [AppService],

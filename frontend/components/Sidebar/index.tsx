@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Hamburger } from "./hamburger"
 import { SidebarContents } from "./sidebarContents"
 import { FaClock, FaDoorOpen, FaFolder, FaHome, FaUserCircle, FaVideo } from "react-icons/fa"
+import { useSelector } from "react-redux"
 
 const sidebarArray = [
     {
@@ -39,9 +40,11 @@ export const Sidebar = () => {
 
     // React states
     const [openSidebar, setOpenSidebar] = useState(false)
-
+    const isLoggedIn = useSelector((state: any) => state.user?.user?.isLoggedIn);
     // user login status
-    const isLoggedIn = false; // Replace with actual login status
+    // const isLoggedIn = false; // Replace with actual login status
+    // const [isLoggedIn, setIsLoggedIn] = useState(false);
+    
 
     return <div
     className="flex flex-col p-4">

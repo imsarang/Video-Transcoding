@@ -9,6 +9,9 @@ services:
     environment:
       - AUTH_SERVICE_URL=http://auth-service:3002
       - USER_SERVICE_URL=http://user-service:3003
+      # Improve file-change detection for host->container mounts on Windows/VMs
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=100
     volumes:
       - ./api-gateway:/usr/src/app
       - api_gateway_node_modules:/usr/src/app/node_modules
@@ -29,6 +32,8 @@ services:
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - NODE_ENV=dev
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=100
     volumes:
       - ./auth-service:/usr/src/app
       - auth-service_node_modules:/usr/src/app/node_modules
@@ -36,19 +41,23 @@ services:
       - transcoder-network
 
   user-service:
-    build: ./user-service
+    build: 
+      context: ./user-service
+      target: dev
     container_name: user-service
     ports:
       - "3003:3003"
     depends_on:
-      # - redis
       - postgres
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - POSTGRES_USER=myusername
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=postgres
       - NODE_ENV=dev
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=100
     volumes:
       - ./user-service:/usr/src/app
       - user-service_node_modules:/usr/src/app/node_modules
@@ -66,6 +75,8 @@ services:
       - transcoder-network
     environment:
       - REACT_APP_API_URL=http://localhost:3001
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=100
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules

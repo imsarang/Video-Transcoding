@@ -1,10 +1,14 @@
 import { HttpModule } from "@nestjs/axios";
 import { Module, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { JwtModule } from "@nestjs/jwt";
 import { Logger } from "nestjs-pino";
 import { AuthController } from "src/controllers/auth.controller";
 
 @Module({
-    imports: [HttpModule],
+    imports: [
+        HttpModule,
+        JwtModule.register({})
+    ],
     controllers: [AuthController]
 })
 export class AuthModule implements OnModuleInit, OnModuleDestroy {

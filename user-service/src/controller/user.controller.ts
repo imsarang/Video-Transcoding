@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Post, Put, Res } from "@nestjs/common";
 import { Response } from "express";
+import { Logger } from "nestjs-pino";
 import { CreateUserDto } from "src/dto/entity.dto";
 import { UserService } from "src/service/user.service";
 
@@ -7,8 +8,15 @@ import { UserService } from "src/service/user.service";
 export class UserController {
 
     constructor (
-        private readonly userService: UserService
+        private readonly userService: UserService,
+        private readonly logger: Logger
     ){}
+
+    @Get('/')
+    async getUsers () { 
+        this.logger.log(`Received request to get all users.`);
+        return await this.userService.getUsers();
+    }
 
     @Post('/')
     async createUser(
@@ -26,6 +34,7 @@ export class UserController {
         return await this.userService.getUserByEmail(email);
     }
     @Get('/:id')
+    async getUserById(){}
 
     @Put('/:id')
     async updateUser() { }

@@ -16,17 +16,18 @@ interface LoginInterface {
 interface FormInputInterface {
     name: string,
     value: string,
+    type: string,
     data: any | RegisterInterface | LoginInterface
     setData: any | Dispatch<SetStateAction<RegisterInterface | LoginInterface>>
 }
 
 export const FormInput = ({...props}: FormInputInterface) => {
 
-    const {name, value, data, setData} = props
+    const {name, value, type, data, setData} = props
     return <div
     className="flex flex-col relative">
         <input
-        type="text"
+        type={type}
         name = {name}
         value={value}
         onChange={(e) => setData({...data, [e.target.name] : e.target.value})}

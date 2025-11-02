@@ -6,7 +6,7 @@ export const validateUsername = (username: string) => {
 }
 
 export const validatePassword = (password: string, confirmPassword: string) => {
-    if(password.length < 6) {
+    if(password.length < 8) {
         return false
     }
     if(password !== confirmPassword) {

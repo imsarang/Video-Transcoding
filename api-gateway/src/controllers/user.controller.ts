@@ -11,17 +11,38 @@ export class UserController {
         private readonly httpService: HttpService
     ){}
 
+    private url = process.env.USER_SERVICE_URL ?? 'http://localhost:3003';
     private async proxyRequest(method: 'get' | 'post' | 'put' | 'delete', path: string, data?: any, params?: any) {
-        this.logger.log(`Forwarding ${method.toUpperCase()} request to ${path}`)
-        const url = `${process.env.USER_SERVICE_URL}${path}`;
-        const response = this.httpService.request({
-            method,
-            url,
-            data,
-            params,
-        })
+        // const url = `${process.env.USER_SERVICE_URL}${path}`;
+        this.logger.log(`Forwarding ${method.toUpperCase()} request to ${this.url}`);
+        const url = `${this.url}${path}`;
+        try {
+            const response = this.httpService.request({
+                method,
+                url,
+                data,
+                params,
+                validateStatus: status => true, // Don't throw on any status
+            });
 
-        return firstValueFrom(response);
+            const result = await firstValueFrom(response);
+            this.logger.log({
+                msg: `Proxy response received`,
+                status: result.status,
+                statusText: result.statusText,
+                url: url
+            });
+            return result.data;
+        } catch (error) {
+            this.logger.error({
+                msg: 'Proxy request failed',
+                error: error.message,
+                url,
+                method,
+                data
+            });
+            throw error;
+        }
     }
 
     @Get('/:id')
@@ -29,6 +50,12 @@ export class UserController {
         @Param('id') id: string
     ) {
         return this.proxyRequest('get', `/${id}`);
+    }
+
+    @Get('/')
+    async getAllUsers () {
+        this.logger.log(`Received request to get all users.`);
+        return this.proxyRequest('get', '/');
     }
 
     @Post()

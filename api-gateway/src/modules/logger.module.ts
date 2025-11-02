@@ -4,10 +4,20 @@ import { LoggerModule } from "nestjs-pino";
 @Module({
     imports: [
         LoggerModule.forRootAsync({
-            useFactory: () => ({
-                pinoHttp: {
-                    level: process.env.LOG_LEVEL || 'info',
-                    transport: {
+            useFactory: () => {
+                const base: any = {
+                    pinoHttp: {
+                        level: process.env.LOG_LEVEL || 'info',
+                        autoLogging: false
+                    }
+                };
+
+                // pino-pretty is a dev-time pretty printer and is listed as a devDependency.
+                // In production (Docker) devDependencies may not be installed which causes
+                // pino to fail resolving the transport target. Use the pretty transport only
+                // when not running in production.
+                if (process.env.NODE_ENV !== 'production') {
+                    base.pinoHttp.transport = {
                         targets: [{
                             target: 'pino-pretty',
                             level: 'info',
@@ -17,9 +27,11 @@ import { LoggerModule } from "nestjs-pino";
                                 ignore: 'pid,hostname'
                             }
                         }]
-                    }
+                    };
                 }
-            })
+
+                return base;
+            }
         })
     ]
 })

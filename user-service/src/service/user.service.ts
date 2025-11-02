@@ -9,11 +9,10 @@ import * as uuid from 'uuid';
 
 @Injectable()
 export class UserService {
-    private readonly logger = Logger
-    
     constructor(
         @InjectRepository(User)
         private userRepository: Repository<User>,
+        private readonly logger: Logger,
     ){}
 
     async createUser(createUserData: CreateUserDto) {
@@ -83,4 +82,11 @@ export class UserService {
 
     async forgotPassword() { }
 
+    async getUsers () {
+        this.logger.log(`Fetching all users from database.`);
+        const users = await this.userRepository.find()
+        this.logger.log(`Fetched ${users.length} users from database.`);
+        // this.logger.debug(users)
+        return users;     
+    }
 }
