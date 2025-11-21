@@ -1,0 +1,28 @@
+# Terraform: Ignore all state, cache, and provider binaries everywhere
+*.tfstate
+*.tfstate.backup
+*.tfvars
+crash.log
+*.tfplan
+.terraform/
+.terraform/*
+**/.terraform/
+**/.terraform/*
+*.zip
+*.x5
+*.tar.gz
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+
+# VSCode and other IDE/project files
+.vscode/
+.idea/
+.DS_Store
+
+# Node & Python
+node_modules/
+.env*
+__pycache__/

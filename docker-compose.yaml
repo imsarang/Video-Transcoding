@@ -1,0 +1,122 @@
+version: "3.8"
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports: 
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - transcoder-network
+    environment:
+      - APP_API_DEV=http://localhost:3001
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+  
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      - AUTH_SERVICE_URL=http://auth-service:3002
+      - VIDEO_SERVICE_URL=http://video-service:3003
+    depends_on:
+      - auth-service
+      - video-service
+    volumes:
+      - ./api-gateway:/usr/src/app
+      - api_gateway_node_modules:/usr/src/app/node_modules
+    networks:
+      - transcoder-network
+
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports: 
+      - "3002:3002"
+    depends_on:
+      - redis
+      - postgres
+      # - datadog
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - NODE_ENV=dev
+    volumes:
+      - ./auth-service:/usr/src/app
+      - auth-service_node_modules:/usr/src/app/node_modules
+    networks:
+      - transcoder-network
+  
+  video-service:
+    build: ./video-service
+    container_name: video-service
+    ports:
+      - "3003:3003"
+    depends_on:
+      - redis
+      - postgres
+      # - datadog
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - NODE_ENV=dev
+    volumes:
+      - ./video-service:/usr/src/app
+      - video-service_node_modules=/usr/src/app/node_modules
+    networks:
+      - transcoder-network
+  
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - transcoder-network
+    volumes:
+      - transcoder_redis_data:/data
+
+  postgres:
+    image: postgres:latest
+    conrtainer_name: postgres
+    ports:
+      "5432:5432"
+    environment:
+      - POSTGRES_USER: myusername
+      - POSTGRES_PASSWORD: mypassword
+      - POSTGRES_DB: myTranscoderDB
+      - PGDATA: /var/lib/postgresql/newData
+    networks:
+      - transcoder-network
+    volumes:
+      - transcoder_postgres_data: /var/lib/postgresql/newData
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myusername -d myTranscoderDB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # datadog:
+
+    
+volumes:  
+  transcoder_redis_data:
+  transcoder_postgres_data:
+  auth-service_node_modules:
+  video-service_node_modules:
+  frontend_node_modules:
+  api_gateway_node_modules:
+
+networks:
+  transcoder-network:
+    name: transcoder-network
+    driver: bridge
