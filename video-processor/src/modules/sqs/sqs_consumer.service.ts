@@ -22,7 +22,7 @@ export class SqsConsumerService implements OnModuleInit, OnModuleDestroy {
     async onModuleInit() {
         this.isRunning = true
         this.logger.info(`Starting SQS Consumer`)
-        this.pollQueue()    
+        // this.pollQueue()    
     }
 
     async onModuleDestroy() {

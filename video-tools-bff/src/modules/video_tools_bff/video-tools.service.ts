@@ -23,9 +23,4 @@ export class VideoToolsBffService {
     async createDownloadPreSignedUrl(key: string): Promise<string> {
         return await this.awsConfig.getDownloadUrl(key);
     }
-
-    async downloadVideo(id: string): Promise<any> {
-        // TODO: Implement video download logic
-        return { message: 'Not implemented yet', id };
-    }
 }

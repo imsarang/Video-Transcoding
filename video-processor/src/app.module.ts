@@ -7,8 +7,9 @@ import { LoggerModule } from 'nestjs-pino';
 import { ConvertService } from './modules/video-convert/video-convert.service';
 import { SqsConsumerService } from './modules/sqs/sqs_consumer.service';
 import { SqsConsumerModule } from './modules/sqs/sqs_consumer.module';
-import { ConfigModule } from '@nestjs/config';
 import { FfmpegConfig } from './config/ffmpeg.config';
+import { ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
@@ -22,20 +23,20 @@ import { FfmpegConfig } from './config/ffmpeg.config';
           options: {
             colorize: true,
             translateTime: 'SYS:standard',
-            ignore: 'pid,hostname',
-          },
+            ignore: 'pid,hostname,req,res,responseTime',
+          }
         } : undefined,
+        autoLogging: false // optionally disable auto http logs
       }
     }),
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env'
-    })
+    }),
   ],
   controllers: [
     AppController,
     ConvertController
   ],
-  providers: [AppService, ConvertService, SqsConsumerService, FfmpegConfig],
+  providers: [AppService, ConvertService, SqsConsumerService, FfmpegConfig, ConfigService],
 })
 export class AppModule {}

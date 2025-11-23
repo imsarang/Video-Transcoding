@@ -1,8 +1,13 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query, Req } from "@nestjs/common";
 import { VideoToolsBffService } from "./video-tools.service";
 import { HttpService } from "@nestjs/axios";
 import { Logger } from "nestjs-pino";
 import { firstValueFrom } from "rxjs";
+import { randomUUID } from "crypto";
+
+// Global map to store input key -> output key mappings (thread-safe for concurrent requests)
+// Key: input S3 key (e.g., "user123/1234567890-video.mp4")
+// Value: output S3 key after processing
 
 @Controller('video')
 export class VideoToolsBffController {
@@ -12,7 +17,7 @@ export class VideoToolsBffController {
         private readonly httpService: HttpService
     ) {}
 
-    private processingUrl: string = `${process.env.VIDEO_PROCESSING_URL}/processing` || 'http://localhost:3005/processing';
+    private processingUrl: string = process.env.VIDEO_PROCESSING_URL ? `${process.env.VIDEO_PROCESSING_URL}/processing` : 'http://localhost:3005/processing';
 
     private async proxyRequest(
         method: 'get' | 'post' | 'put'| 'delete',
@@ -20,8 +25,8 @@ export class VideoToolsBffController {
         data?: any,
         params?: any
     ){
-        this.logger.log(`Forwarding ${method.toUpperCase()} request to ${this.processingUrl}`);
         const url = `${this.processingUrl}${path}`;
+        this.logger.log(`Forwarding ${method.toUpperCase()} request to ${url}`);
         try {
             const response = this.httpService.request({
                 method,
@@ -54,13 +59,27 @@ export class VideoToolsBffController {
     // construct an upload pre-signed s3 url
     @Post('/upload/pre-signed-s3-url')
     async getUploadPreSignedS3Url(
-        @Body() body
-    ): Promise<string> {
-        const {key, contentType, metadata} = body
-        console.log(key, contentType, metadata);
-        console.log("BODY RECEIVED:", body);
-        console.log("TYPE OF METADATA:", typeof metadata);
-        return await this.videoToolsService.createUploadPreSignedUrl(key, contentType, metadata);
+        @Body() body,
+        @Req() req: any
+    ): Promise<{ url: string; key: string }> {
+        const { key: originalKey, contentType, metadata, uniqueKey } = body;
+        
+        
+        this.logger.log({
+            msg: 'Generating pre-signed URL',
+            originalKey,
+            uniqueKey,
+            hasAuth: !!req.user,
+            remoteAddress: req.socket?.remoteAddress || req.ip
+        });
+        
+        const url = await this.videoToolsService.createUploadPreSignedUrl(uniqueKey, contentType, metadata);
+        
+        // Return both URL and key so frontend can track it
+        return {
+            url,
+            key: uniqueKey
+        };
     }
 
     // construct a download pre-signed s3 url
@@ -91,15 +110,13 @@ export class VideoToolsBffController {
     async convertVideoQuality(
         @Body() body: any
     ): Promise<any> {
-        return await this.proxyRequest('post', '/convert/transcoder', body)
+        return await this.proxyRequest('post', '/transcoder', body)
     }
 
-    // download video
-    @Get('/download/:id')
-    async downloadVideo(
-        @Param('id') id: string
+    @Post('/convert')
+    async convertVideoFormat(
+        @Body() body: any
     ): Promise<any> {
-        return this.videoToolsService.downloadVideo(id);
+        return await this.proxyRequest('post', '/convert', body)
     }
-
 }

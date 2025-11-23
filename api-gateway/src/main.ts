@@ -5,6 +5,7 @@ import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { GlobalHttpExceptionFilter } from './interceptors/globalExceptionFilter.interceptor';
 import cookieParser from 'cookie-parser'
+import bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -20,6 +21,8 @@ async function bootstrap() {
   app.useGlobalFilters(new GlobalHttpExceptionFilter())
 
   app.use(cookieParser())
+  app.use(bodyParser.json())
+  app.use(bodyParser.text({ type: 'text/plain' }))
   await app.listen(process.env.PORT ?? 3001);
 }
 bootstrap();

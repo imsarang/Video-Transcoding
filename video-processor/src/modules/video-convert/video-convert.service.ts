@@ -5,10 +5,10 @@ import AWS from 'aws-sdk';
 import { PassThrough } from "stream";
 import ffmpeg from 'fluent-ffmpeg';
 import util from 'util';
-import { createWriteStream, unlink } from 'fs';
+import { createWriteStream, unlinkSync, createReadStream } from 'fs';
 import { promisify } from 'util';
-import { createReadStream } from 'fs';
-const unlinkAsync = promisify(unlink);
+const unlinkAsync = promisify(unlinkSync);
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class ConvertService {
@@ -18,7 +18,8 @@ export class ConvertService {
 
     constructor(
         private readonly logger: Logger,
-        private readonly ffmpegConfig: FfmpegConfig
+        private readonly ffmpegConfig: FfmpegConfig,
+        private readonly configService: ConfigService
     ){}
 
     async createInputStreamWithRetry(inputBucket: string, inputKey: string, attempt = 1): Promise<NodeJS.ReadableStream> {
@@ -84,191 +85,131 @@ export class ConvertService {
     }
 
     async convertVideoFormat(job: any) {
-        const { inputBucket, inputKey, metadata = {} } = job;
-        this.s3 = new AWS.S3({
-            region: process.env.AWS_REGION,
-            httpOptions: { timeout: 300000 }, // 5 minutes
-        });
+        const { inputBucket, inputKey, targetformat, metadata = {} } = job;
+        console.log('Converting video:', job);
+        this.s3 = new AWS.S3({ region: process.env.AWS_REGION });
 
-        // let inputStream: NodeJS.ReadableStream;
-        // try {
-        //     inputStream = await this.createInputStreamWithRetry(inputBucket, inputKey);
-        // } catch (err) {
-        //     this.logger.error('[VideoConvert] Failed to fetch input from S3 after retries', { err });
-        //     throw err;
-        // }
+        // Use sanitized inputKey as tmp file base (replace slashes with underscores)
+        const ext = (inputKey.split('.').pop() || 'mp4');
+        const targetExt = targetformat || metadata.targetformat || 'mp4';
+        const baseFile = inputKey.replace(/\//g, '_'); // make valid filename
+        const inputTmpPath = `/tmp/${baseFile}`;
+        const outputTmpPath = `/tmp/${baseFile}-output.${targetExt}`;
 
-        this.logger.log({
-            msg: '[VideoConvert] Starting conversion job',
-            inputBucket,
-            inputKey,
-            metadata,
-        });
-
-        // Setup and write S3 stream to temp file with robust event handling
-        const tmpPath = `/tmp/${inputKey.replace(/\//g, '_')}`;
+        // Download from S3 to local tmp file
         const s3Object = this.s3.getObject({ Bucket: inputBucket, Key: inputKey });
         const inputStream = s3Object.createReadStream();
-        const outputFile = createWriteStream(tmpPath);
-
-        let bytesRead = 0;
-        inputStream
-          .on('open', () => this.logger.log('[VideoConvert] S3 stream open to write data to file'))
-          .on('data', (chunk) => {
-            bytesRead += chunk.length;
-            if (bytesRead % (10 * 1024 * 1024) < chunk.length) {
-              this.logger.log('[VideoConvert] S3 read progress', { progress: bytesRead });
-            }
-          })
-          .on('end', () => this.logger.log('[VideoConvert] S3 read end'))
-          .on('close', () => this.logger.log('[VideoConvert] S3 read close'))
-          .on('error', (err) => {
-            this.logger.error('[VideoConvert] S3 stream error during write-to-file', { err });
-          });
-
+        const outputFile = createWriteStream(inputTmpPath);
         await new Promise<void>((resolve, reject) => {
-          outputFile
-            .on('finish', () => {
-              this.logger.log(`[VideoConvert] S3 object written to file: ${tmpPath}`);
-              resolve();
-            })
-            .on('error', (err) => {
-              this.logger.error('[VideoConvert] File write error', { err });
-              reject(err);
-            });
-          inputStream.pipe(outputFile);
+          inputStream.pipe(outputFile)
+            .on('finish', resolve)
+            .on('error', reject);
         });
 
-        // Define output temp file path
-        const outputPath = tmpPath.replace(/\.[^/.]+$/, `.${metadata.targetformat}`);
+        // --- Construct ffmpeg command with robust metadata checks/defaults ---
+        let ffmpegCmd = ffmpeg(inputTmpPath);
 
-        // this.logger.log(`[VideoConvert] Will convert video`, { realOutputFormat, outputKey: movPath });
-
-        const {
-          framerate,
-          videoresolution,
-          targetformat,
-          videoCodec,
-          audioCodec,
-          noaudio,
-          audioBitrate,
-          videoBitrate,
-          audioChannels,
-          audioSampleRate
-        } = metadata;
-        const realOutputFormat = targetformat || 'mov';
-        let width, height;
-        if (videoresolution) {
-          try {
-            if (typeof videoresolution === 'string') {
-              ({ width, height } = JSON.parse(videoresolution));
-            } else if (typeof videoresolution === 'object') {
-              ({ width, height } = videoresolution);
-            }
-          } catch (err) {
-            this.logger.warn('[VideoConvert] Could not parse videoresolution from metadata', { videoresolution, err });
-          }
+        // Video Codec
+        if (metadata.videoCodec) {
+          ffmpegCmd = ffmpegCmd.videoCodec(metadata.videoCodec);
+        } else {
+          ffmpegCmd = ffmpegCmd.videoCodec('libx264'); // default
         }
-        await new Promise<void>((resolve, reject) => {
-          let ffmpegCmd = ffmpeg(tmpPath);
-          // Dynamically add all options from metadata when present.
-          if (videoCodec) {
-            ffmpegCmd = ffmpegCmd.videoCodec(videoCodec);
-          } else {
-            ffmpegCmd = ffmpegCmd.videoCodec('libx264'); // fallback for mp4/mov
-          }
-          if (audioCodec && !noaudio) {
-            ffmpegCmd = ffmpegCmd.audioCodec(audioCodec);
-          }
-          if (framerate) {
-            ffmpegCmd = ffmpegCmd.fps(Number(framerate));
-          }
-          if (width && height) {
-            ffmpegCmd = ffmpegCmd.size(`${width}x${height}`);
-          }
-          if (noaudio) {
-            ffmpegCmd = ffmpegCmd.noAudio();
-          }
-          if (videoBitrate) {
-            ffmpegCmd = ffmpegCmd.videoBitrate(String(videoBitrate));
-          }
-          if (audioBitrate && !noaudio) {
-            ffmpegCmd = ffmpegCmd.audioBitrate(String(audioBitrate));
-          }
-          if (audioChannels && !noaudio) {
-            ffmpegCmd = ffmpegCmd.audioChannels(Number(audioChannels));
-          }
-          if (audioSampleRate && !noaudio) {
-            ffmpegCmd = ffmpegCmd.audioFrequency(Number(audioSampleRate));
-          }
-          ffmpegCmd = ffmpegCmd.format(realOutputFormat);
 
+        // Audio Codec
+        if ((metadata.audioCodec !== undefined && !(metadata.noaudio === 'true' || metadata.noaudio === true))) {
+          ffmpegCmd = ffmpegCmd.audioCodec(metadata.audioCodec);
+        } // else: use ffmpeg defaults or inherit from source
+
+        // Frame Rate
+        const framerate = metadata.framerate !== undefined ? Number(metadata.framerate) : 30;
+        if (!isNaN(framerate) && framerate > 0) {
+          ffmpegCmd = ffmpegCmd.fps(framerate);
+        }
+
+        // Video Resolution
+        let width = undefined, height = undefined;
+        if (metadata.videoresolution) {
+          try {
+            let vresObj = metadata.videoresolution;
+            if (typeof vresObj === 'string') {
+              vresObj = JSON.parse(vresObj);
+            }
+            width = vresObj.width;
+            height = vresObj.height;
+          } catch {}
+        }
+        if (width && height && Number(width) > 0 && Number(height) > 0) {
+          ffmpegCmd = ffmpegCmd.size(`${width}x${height}`);
+        } // else fallback to source resolution
+
+        // No audio (mute)
+        if (metadata.noaudio === 'true' || metadata.noaudio === true) {
+          ffmpegCmd = ffmpegCmd.noAudio();
+        }
+
+        // Video Bitrate
+        if (metadata.videoBitrate) {
+          ffmpegCmd = ffmpegCmd.videoBitrate(String(metadata.videoBitrate));
+        }
+        // Audio Bitrate
+        if (metadata.audioBitrate && !(metadata.noaudio === 'true' || metadata.noaudio === true)) {
+          ffmpegCmd = ffmpegCmd.audioBitrate(String(metadata.audioBitrate));
+        }
+        // Audio Channels
+        const audioChannels = metadata.audioChannels !== undefined ? Number(metadata.audioChannels) : null;
+        if (audioChannels && !isNaN(audioChannels) && !(metadata.noaudio === 'true' || metadata.noaudio === true)) {
+          ffmpegCmd = ffmpegCmd.audioChannels(audioChannels);
+        }
+        // Audio Sample Rate
+        const audioSampleRate = metadata.audioSampleRate !== undefined ? Number(metadata.audioSampleRate) : null;
+        if (audioSampleRate && !isNaN(audioSampleRate) && !(metadata.noaudio === 'true' || metadata.noaudio === true)) {
+          ffmpegCmd = ffmpegCmd.audioFrequency(audioSampleRate);
+        }
+
+        // Output format (container)
+        ffmpegCmd = ffmpegCmd.format(targetExt);
+        
+        // --- End ffmpeg build ---
+
+        await new Promise<void>((resolve, reject) => {
           ffmpegCmd
-            .on('start', (commandLine) => {
-                this.logger.log('[VideoConvert] FFmpeg command line', { commandLine });
-            })
-            .on('stderr', (stderrLine) => {
-                this.logger.error('[VideoConvert] FFmpeg stderr', { stderrLine });
-            })
-            .on('codecData', (data) => {
-                this.logger.log('[VideoConvert] FFmpeg codecData', { data });
-            })
-            .on('end', async () => {
-                this.logger.log('[VideoConvert] FFmpeg end');
-                try {
-                    await unlinkAsync(tmpPath);
-                    this.logger.log(`[VideoConvert] Deleted temp source file: ${tmpPath}`);
-                } catch (e) {
-                    this.logger.error('[VideoConvert] Temp file delete failed', { tmpPath, err: e });
-                }
-                resolve();
-            })
+            .on('end', resolve)
             .on('error', (err, stdout, stderr) => {
-                this.logger.error('[VideoConvert] FFmpeg error', { err, stdout, stderr });
-                reject(err);
+              this.logger.error('[VideoConvert] FFmpeg error', { err, stdout, stderr });
+              reject(err);
             })
-            .save(outputPath);
-            
+            .save(outputTmpPath);
         });
 
-        // Now upload new outputPath to S3
-        type AWS_S3_Upload_Params = AWS.S3.PutObjectRequest;
-        const outputKey = inputKey.replace(/\.[^/.]+$/, `.${metadata.targetformat}`);
-        this.logger.log(`[VideoConvert] Uploading converted file to S3: ${outputKey}`);
-        await new Promise<void>((resolve, reject) => {
-            const outputReadStream = createReadStream(outputPath);
-            outputReadStream
-              .on('error', (err) => {
-                this.logger.error('[VideoConvert] Error reading converted file for S3 upload', { err });
-                reject(err);
-              });
-            this.s3.upload({
-              Bucket: process.env.AWS_S3_BUCKET as string,
-              Key: outputKey,
-              Body: outputReadStream,
-              ContentType: `video/${metadata.targetformat}`
-            }).promise()
-              .then((data) => {
-                this.logger.log('[VideoConvert] Upload complete', data);
-                resolve();
-              })
-              .catch((err) => {
-                this.logger.error('[VideoConvert] Upload error', { err });
-                reject(err);
-              });
+        // Upload result
+        const outputKey = inputKey.replace(new RegExp(`\\.${ext}$`), `-converted.${targetExt}`);
+        await this.s3.upload({
+          Bucket: this.configService.get<string>('AWS_S3_BUCKET') as string,
+          Key: outputKey,
+          Body: createReadStream(outputTmpPath),
+          ContentType: `video/${targetExt}`
+        }).promise()
+        .then(() => {
+          this.logger.log('[VideoConvert] Upload complete');
+        })
+        .catch((err) => {
+          this.logger.error('[VideoConvert] Upload error', { err });
+          throw new Error('Failed to upload converted video to S3');
         });
-        // Clean up mov output file
+
+        // Cleanup
         try {
-            await unlinkAsync(outputPath);
-            this.logger.log(`[VideoConvert] Deleted temp output file: ${outputPath}`);
-        } catch (e) {
-            this.logger.error('[VideoConvert] Temp output file delete failed', { outputPath, err: e });
+          unlinkSync(inputTmpPath);
+          unlinkSync(outputTmpPath);
+        } catch(e) {
+          this.logger.warn("Temp file delete failed", e);
         }
 
         return {
-            success: true,
-            message: `Video converted successfully`,
-            outputKey: outputKey
-        }
+          success: true,
+          outputKey,
+          message: 'Video converted successfully',
+        };
     }
 }

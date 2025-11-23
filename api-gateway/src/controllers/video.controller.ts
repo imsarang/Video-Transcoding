@@ -1,7 +1,10 @@
 import { HttpService } from "@nestjs/axios";
-import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
+import { randomUUID } from "crypto";
 import { Logger } from "nestjs-pino";
 import { firstValueFrom } from "rxjs";
+
+const outputKeyMap: Map<string, string> = new Map();
 
 @Controller('/video')
 export class VideoController {
@@ -53,18 +56,148 @@ export class VideoController {
     async getUploadPreSignedUrl(
         @Body() body: any
     ){
+        
+        // Option 2: Generate unique session-based identifier
+        
+        // Option 3: Use timestamp + random UUID as fallback
+        const uniqueId =`${Date.now()}-${randomUUID()}`;
+        
+        // Create unique S3 key: {userId|sessionId}/{timestamp}-{originalFilename}
+        const sanitizedUserId = String(uniqueId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const timestamp = Date.now();
+        const sanitizedFilename =body.originalKey?.replace(/[^a-zA-Z0-9._-]/g, '_') || 'file';
+        const uniqueKey = `${sanitizedUserId}/${timestamp}-${sanitizedFilename}`;
+        body = {...body, uniqueKey: uniqueKey}
         const response = await this.proxyRequest('post', `/video/upload/pre-signed-s3-url`, body,{})
         return response
     }
 
     @Get('/download/pre-signed-s3-url')
     async getDownloadPreSignedUrl(@Query('key') key: string){
-        return await this.proxyRequest('get', `/video/download/pre-signed-s3-url`, undefined, { key })
+        return await this.proxyRequest('get', `/video/download/pre-signed-s3-url?key=${key}`, undefined, { key: outputKeyMap[key] })
     }
     @Post('/convert/extension')
     async convertVideo(
-        @Body() body: any
+        @Body() body: any,
     ){
         return await this.proxyRequest('post', '/video/convert/extension', body)
+    }
+
+    @Post('/webhook')
+    async webhook(
+        @Body() body: any,
+        @Headers() headers: any
+    ) {
+        
+        if(typeof body === 'string') {
+          try{
+            body = JSON.parse(body);
+            this.logger.log('Parsed SNS body:', body);
+            
+          } catch (e) {
+            this.logger.error({
+              msg: 'Error parsing JSON',
+              error: e.message
+            });
+            return { status: 'Invalid JSON', error: e };
+          }
+        }
+
+        if(headers['x-amz-sns-message-type'] === 'SubscriptionConfirmation') {
+          this.logger.log('SNS subscription confirmed');
+          await fetch(body.SubscribeURL)
+            .then(response => response.text())
+            .then(data => {
+              this.logger.log('SNS subscription confirmed', data);
+              return { status: 'Subscription confirmed' };
+            })
+            .catch(error => {
+              this.logger.error('Error confirming SNS subscription', error);
+              return { status: 'Error confirming SNS subscription', error: error.message };
+            });
+        }
+
+        if(body.Type === 'Notification') {
+          let message;
+          try {
+            message = typeof body.Message === 'string' ? JSON.parse(body.Message) : body.Message;
+          } catch (e) {
+            this.logger.error({
+              msg: 'Error parsing SNS message',
+              error: e.message
+            });
+            return { status: 'Invalid message format', error: e };
+          }
+
+          // Extract input S3 key from SNS message
+          // S3 event notifications typically have: Records[0].s3.object.key
+          let inputKey: string | null = null;
+          
+          if (message.Records && Array.isArray(message.Records) && message.Records.length > 0) {
+            // S3 event notification structure
+            const s3Record = message.Records[0];
+            inputKey = s3Record.s3?.object?.key || s3Record.s3Object?.key;
+          } else if (message.key) {
+            // Direct key in message
+            inputKey = message.key;
+          } else if (message.inputKey) {
+            // Alternative key field
+            inputKey = message.inputKey;
+          }
+
+          if (!inputKey) {
+            this.logger.error({
+              msg: 'Could not extract input key from SNS message',
+              message: message
+            });
+            return { status: 'error', message: 'Input key not found in notification' };
+          }
+
+          this.logger.log({
+            msg: 'Processing SNS notification',
+            inputKey,
+            messageType: message.Records?.[0]?.eventName || 'unknown'
+          });
+          
+          try {
+            const result = await this.proxyRequest('post', `/video/convert`, message);
+            
+            // Map input key to output key (supports multiple concurrent users/devices)
+            if (result?.outputKey) {
+              outputKeyMap.set(inputKey, result.outputKey);
+              this.logger.log({
+                msg: 'Video conversion completed',
+                inputKey,
+                outputKey: result.outputKey
+              });
+            } else {
+              this.logger.warn({
+                msg: 'Conversion result missing outputKey',
+                inputKey,
+                result
+              });
+            }
+            
+            return { 
+              status: 'success', 
+              inputKey, 
+              outputKey: result?.outputKey 
+            };
+          } catch(e) {
+            this.logger.error({
+              msg: 'Error converting video',
+              error: e.message,
+              inputKey,
+              stack: e.stack
+            });
+            return { 
+              status: 'error', 
+              error: e.message, 
+              inputKey 
+            };
+          }
+        }
+
+        return { status: 'unknown message type' };
     }
 }

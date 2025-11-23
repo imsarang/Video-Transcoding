@@ -5,6 +5,7 @@ import { BiUpload } from "react-icons/bi"
 import { api, bff_api } from "../../utils/apiUtils"
 import { useRouter } from "next/navigation"
 import { uploadToS3 } from "../../utils/s3Utils"
+import { TbWashDry } from "react-icons/tb"
 
 const VIDEO_FORMATS = ["mp4", "webm", "avi", "mov", "mkv"]
 
@@ -35,6 +36,7 @@ export const ConvertVideo = () => {
     const [file, setFile] = useState<File | null>(null)
     const [filename, setFilename] = useState<string>("")
     const [preSignedUrl, setPreSignedUrl] = useState<string>("")
+    const [inputKey, setInputKey] = useState<string>("") // Store the S3 input key for tracking
 
     const [metadata, setMetadata] = useState({
         name: "",
@@ -53,6 +55,7 @@ export const ConvertVideo = () => {
     const [targetFormat, setTargetFormat] = useState("")
     const [convertedFileUrl, setConvertedUrl] = useState(null)
     const [previewFile, setPreviewFile] = useState<string| null>(null)
+    const [uploadingToS3, setUploadingToS3] = useState<boolean>(false)
     
     // Video conversion settings
     const [videoResolution, setVideoResolution] = useState<string>("")
@@ -241,8 +244,15 @@ export const ConvertVideo = () => {
 
         // upload the actual media file to s3 with metadata
         if (!file) throw new Error('No file selected')
-        
-        await uploadToS3(file, preSignedUrl, s3Meta); // file from state
+
+        setUploadingToS3(true)
+        try{
+          await uploadToS3(file, preSignedUrl, s3Meta); // file from state
+        } catch(err) {
+          toast.error('Could not upload to s3')
+        } finally {
+          setUploadingToS3(false)
+        }
         
         // remove the file from payload before sending metadata downstream
         delete payload.media;
@@ -271,8 +281,12 @@ export const ConvertVideo = () => {
       )
         console.log(response.data)
         
-        // setPreSignedUrl(response.data.data || 's3-pre-signed-url')
-        return response.data.data
+        // Response format: { success: true, data: { url: string, key: string } }
+        const result = response.data.data;
+        if (result.key) {
+          setInputKey(result.key); // Store the input key for later reference
+        }
+        return result.url || result; // Return URL (backward compatible)
       }
       catch(err)
       {
@@ -280,295 +294,309 @@ export const ConvertVideo = () => {
       }
     }
 
-    return <div
-    className="m-4 rounded-xl p-4 bg-white w-full">
-
-        {/* upload video */}
-        <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-blue-400 transition">
-          <label className="cursor-pointer flex flex-col items-center">
-            <BiUpload className="w-10 h-10 text-blue-500 mb-2" />
-            <span className="text-gray-600">Choose a video file</span>
-            <input
-              type="file"
-              accept="video/*"
-              onChange={handleVideoFileChange}
-              className="hidden"
-            />
-          </label>
-        </div>
-
-        {/* upload progress */}
-        {
-          filename && (
-            <>
-            <div
-            className="w-full bg-gray-200 rounded-full h-3 mt-4">
-              <div
-              className="bg-blue-500 h-3 rounded-full transition-all"
-              style={{width: `${uploadProgress}%`}}
-              />
+    return (
+      <>
+        {uploadingToS3 && (
+          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+            <div className="flex flex-col items-center">
+              <svg className="animate-spin h-16 w-16 text-teal-400 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+              </svg>
+              <span className="text-white font-bold text-2xl drop-shadow">Uploading to S3...</span>
             </div>
-            <p 
-            className="text-sm text-gray-600"
-            >
-              {uploadProgress}% uploaded
-            </p>
-            </>
-          )
-        }
-
-        <div
-        className="flex flex-row w-full">
-          {/* video preview */}
-        {
-          previewFile && (
-            <>
-            <div
-            className="mt-4 rounded-lg overflow-hidden shadow border w-1/2 h-1/2">
-              <video
-              src={previewFile}
-              controls
-              className="w-full rounded-lg"
-              />
-            </div>
-            </>
-          )
-        }
-        {/* video metadata */}
-        {metadata && (
-          <div
-          className="mt-4 ml-4 sm:text-sm lg:text-lg">
-            <h4
-            className="text-xl mb-2">Metadata:</h4>
-            <p>
-              <label
-              className="font-bold">Name: </label>{metadata?.name}</p>
-            <p>
-              <label
-              className="font-bold">Size: </label>{formatSize(metadata?.size)}</p>
-            <p>
-              <label
-              className="font-bold">Duration: </label>{formatDuration(metadata?.duration)}</p>
-            <p><label
-            className="font-bold">Type: </label>{metadata?.type}</p>
           </div>
         )}
-        </div>
-      
-      <form
-      onSubmit={handleFileConvertion}>
-        <div
-        className="flex flex-col mt-4">
-          <label
-          className="font-bold">Convert to: </label>
-          <select
-            value={targetFormat}
-            onChange={(e) => setTargetFormat(e.target.value)}
-            className="border p-2 mt-2 rounded"
-          >
-            <option value="">Select format</option>
-            {VIDEO_FORMATS.filter((f) => f !== metadata.type).map((format) => (
-              <option key={format} value={format}>
-                {format}
-              </option>
-            ))}
-          </select>
 
-          {/* Advanced Conversion Settings */}
-          <div className="mt-6 border-t pt-4">
-            <h3 className="text-lg font-bold mb-4">Advanced Settings (Optional)</h3>
-            
-            {/* Video Resolution */}
-            <div className="mb-4">
-              <label className="font-semibold block mb-2">Video Resolution:</label>
-              <select
-                value={videoResolution}
-                onChange={(e) => setVideoResolution(e.target.value)}
-                className="border p-2 w-full rounded"
-                disabled={!sourceMetadata.width}
-              >
-                {sourceMetadata.width > 0 && (
-                  <option value={`${sourceMetadata.width}x${sourceMetadata.height}`}>
-                    {sourceMetadata.width}x{sourceMetadata.height} (Source)
-                  </option>
-                )}
-                <option value="854x480">480p (854x480)</option>
-                <option value="1280x720">720p (1280x720)</option>
-                <option value="1920x1080">1080p (1920x1080)</option>
-                <option value="3840x2160">4K (3840x2160)</option>
-              </select>
-            </div>
-
-            {/* Video Codec */}
-            <div className="mb-4">
-              <label className="font-semibold block mb-2">Video Codec:</label>
-              <select
-                value={videoCodec}
-                onChange={(e) => setVideoCodec(e.target.value)}
-                className="border p-2 w-full rounded"
-              >
-                <option value="">Default</option>
-                <option value="h264">H.264</option>
-                <option value="h265">H.265 (HEVC)</option>
-                <option value="vp9">VP9</option>
-                <option value="av1">AV1</option>
-              </select>
-            </div>
-
-            {/* Frame Rate */}
-            <div className="mb-4">
-              <label className="font-semibold block mb-2">Frame Rate (FPS):</label>
-              <select
-                value={frameRate}
-                onChange={(e) => setFrameRate(e.target.value)}
-                className="border p-2 w-full rounded"
-                disabled={!sourceMetadata.frameRate}
-              >
-                {sourceMetadata.frameRate > 0 && (
-                  <option value={sourceMetadata.frameRate.toString()}>
-                    {sourceMetadata.frameRate} fps (Source)
-                  </option>
-                )}
-                <option value="24">24 fps</option>
-                <option value="30">30 fps</option>
-                <option value="60">60 fps</option>
-              </select>
-            </div>
-
-            {/* Audio Settings */}
-            <div className="mb-4">
-              <div className="flex items-center mb-2">
-                <input
-                  type="checkbox"
-                  id="noAudio"
-                  checked={noAudio}
-                  onChange={(e) => {
-                    setNoAudio(e.target.checked)
-                    if (e.target.checked) {
-                      setAudioCodec("")
-                      setAudioSampleRate("")
-                      setAudioChannels("")
-                      setAudioBitrate("")
-                    }
-                  }}
-                  className="mr-2"
-                />
-                <label htmlFor="noAudio" className="font-semibold">No audio</label>
-              </div>
-              
-              {!noAudio && (
-                <>
-                  <label className="font-semibold block mb-2 mt-2">Audio Codec:</label>
-                  <select
-                    value={audioCodec}
-                    onChange={(e) => setAudioCodec(e.target.value)}
-                    className="border p-2 w-full rounded mb-4"
-                  >
-                    <option value="">Default</option>
-                    <option value="aac">AAC</option>
-                    <option value="mp3">MP3</option>
-                    <option value="opus">Opus</option>
-                    <option value="ac3">AC3</option>
-                  </select>
-
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div>
-                      <label className="font-semibold block mb-2">Sample Rate:</label>
-                      <select
-                        value={audioSampleRate}
-                        onChange={(e) => setAudioSampleRate(e.target.value)}
-                        className="border p-2 w-full rounded"
-                        disabled={!sourceMetadata.audioSampleRate}
-                      >
-                        {sourceMetadata.audioSampleRate > 0 && (
-                          <option value={sourceMetadata.audioSampleRate.toString()}>
-                            {sourceMetadata.audioSampleRate >= 1000 
-                              ? `${(sourceMetadata.audioSampleRate / 1000).toFixed(1)}` 
-                              : sourceMetadata.audioSampleRate.toString()} kHz (Source)
-                          </option>
-                        )}
-                        <option value="44100">44.1 kHz</option>
-                        <option value="48000">48 kHz</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="font-semibold block mb-2">Channels:</label>
-                      <select
-                        value={audioChannels}
-                        onChange={(e) => setAudioChannels(e.target.value)}
-                        className="border p-2 w-full rounded"
-                        disabled={!sourceMetadata.audioChannels}
-                      >
-                        {sourceMetadata.audioChannels > 0 && (
-                          <option value={sourceMetadata.audioChannels.toString()}>
-                            {sourceMetadata.audioChannels === 1 ? 'Mono' : 
-                             sourceMetadata.audioChannels === 2 ? 'Stereo' : 
-                             `${sourceMetadata.audioChannels} channels`} (Source)
-                          </option>
-                        )}
-                        <option value="1">Mono</option>
-                        <option value="2">Stereo</option>
-                      </select>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Bitrate Settings */}
-            <div className="mb-4">
-              <label className="font-semibold block mb-2">Video Bitrate (kbps):</label>
+        <div className={uploadingToS3 ? 'blur-sm grayscale pointer-events-none select-none' : 'w-full'}>
+          {/* upload video */}
+          <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl p-6 hover:border-blue-400 transition">
+            <label className="cursor-pointer flex flex-col items-center">
+              <BiUpload className="w-10 h-10 text-blue-500 mb-2" />
+              <span className="text-gray-600">Choose a video file</span>
               <input
-                type="number"
-                value={videoBitrate}
-                onChange={(e) => setVideoBitrate(e.target.value)}
-                placeholder="e.g., 2000"
-                className="border p-2 w-full rounded"
-                min="0"
+                type="file"
+                accept="video/*"
+                onChange={handleVideoFileChange}
+                className="hidden"
               />
-              {videoBitrate && <p className="text-sm text-gray-500 mt-1">Video bitrate: {videoBitrate} kbps</p>}
-            </div>
+            </label>
+          </div>
 
-            {!noAudio && (
+          {/* upload progress */}
+          {
+            filename && (
+              <>
+              <div
+              className="w-full bg-gray-200 rounded-full h-3 mt-4">
+                <div
+                className="bg-blue-500 h-3 rounded-full transition-all"
+                style={{width: `${uploadProgress}%`}}
+                />
+              </div>
+              <p 
+              className="text-sm text-gray-600"
+              >
+                {uploadProgress}% uploaded
+              </p>
+              </>
+            )
+          }
+
+          <div
+          className="flex flex-row w-full">
+            {/* video preview */}
+          {
+            previewFile && (
+              <>
+              <div
+              className="mt-4 rounded-lg overflow-hidden shadow border w-1/2 h-1/2">
+                <video
+                src={previewFile}
+                controls
+                className="w-full rounded-lg"
+                />
+              </div>
+              </>
+            )
+          }
+          {/* video metadata */}
+          {metadata && (
+            <div
+            className="mt-4 ml-4 sm:text-sm lg:text-lg">
+              <h4
+              className="text-xl mb-2">Metadata:</h4>
+              <p>
+                <label
+                className="font-bold">Name: </label>{metadata?.name}</p>
+              <p>
+                <label
+                className="font-bold">Size: </label>{formatSize(metadata?.size)}</p>
+              <p>
+                <label
+                className="font-bold">Duration: </label>{formatDuration(metadata?.duration)}</p>
+              <p><label
+              className="font-bold">Type: </label>{metadata?.type}</p>
+            </div>
+          )}
+          </div>
+        
+        <form
+        onSubmit={handleFileConvertion}>
+          <div
+          className="flex flex-col mt-4">
+            <label
+            className="font-bold">Convert to: </label>
+            <select
+              value={targetFormat}
+              onChange={(e) => setTargetFormat(e.target.value)}
+              className="border p-2 mt-2 rounded"
+            >
+              <option value="">Select format</option>
+              {VIDEO_FORMATS.filter((f) => f !== metadata.type).map((format) => (
+                <option key={format} value={format}>
+                  {format}
+                </option>
+              ))}
+            </select>
+
+            {/* Advanced Conversion Settings */}
+            <div className="mt-6 border-t pt-4">
+              <h3 className="text-lg font-bold mb-4">Advanced Settings (Optional)</h3>
+              
+              {/* Video Resolution */}
               <div className="mb-4">
-                <label className="font-semibold block mb-2">Audio Bitrate (kbps):</label>
+                <label className="font-semibold block mb-2">Video Resolution:</label>
+                <select
+                  value={videoResolution}
+                  onChange={(e) => setVideoResolution(e.target.value)}
+                  className="border p-2 w-full rounded"
+                  disabled={!sourceMetadata.width}
+                >
+                  {sourceMetadata.width > 0 && (
+                    <option value={`${sourceMetadata.width}x${sourceMetadata.height}`}>
+                      {sourceMetadata.width}x{sourceMetadata.height} (Source)
+                    </option>
+                  )}
+                  <option value="854x480">480p (854x480)</option>
+                  <option value="1280x720">720p (1280x720)</option>
+                  <option value="1920x1080">1080p (1920x1080)</option>
+                  <option value="3840x2160">4K (3840x2160)</option>
+                </select>
+              </div>
+
+              {/* Video Codec */}
+              <div className="mb-4">
+                <label className="font-semibold block mb-2">Video Codec:</label>
+                <select
+                  value={videoCodec}
+                  onChange={(e) => setVideoCodec(e.target.value)}
+                  className="border p-2 w-full rounded"
+                >
+                  <option value="">Default</option>
+                  <option value="h264">H.264</option>
+                  <option value="h265">H.265 (HEVC)</option>
+                  <option value="vp9">VP9</option>
+                  <option value="av1">AV1</option>
+                </select>
+              </div>
+
+              {/* Frame Rate */}
+              <div className="mb-4">
+                <label className="font-semibold block mb-2">Frame Rate (FPS):</label>
+                <select
+                  value={frameRate}
+                  onChange={(e) => setFrameRate(e.target.value)}
+                  className="border p-2 w-full rounded"
+                  disabled={!sourceMetadata.frameRate}
+                >
+                  {sourceMetadata.frameRate > 0 && (
+                    <option value={sourceMetadata.frameRate.toString()}>
+                      {sourceMetadata.frameRate} fps (Source)
+                    </option>
+                  )}
+                  <option value="24">24 fps</option>
+                  <option value="30">30 fps</option>
+                  <option value="60">60 fps</option>
+                </select>
+              </div>
+
+              {/* Audio Settings */}
+              <div className="mb-4">
+                <div className="flex items-center mb-2">
+                  <input
+                    type="checkbox"
+                    id="noAudio"
+                    checked={noAudio}
+                    onChange={(e) => {
+                      setNoAudio(e.target.checked)
+                      if (e.target.checked) {
+                        setAudioCodec("")
+                        setAudioSampleRate("")
+                        setAudioChannels("")
+                        setAudioBitrate("")
+                      }
+                    }}
+                    className="mr-2"
+                  />
+                  <label htmlFor="noAudio" className="font-semibold">No audio</label>
+                </div>
+                
+                {!noAudio && (
+                  <>
+                    <label className="font-semibold block mb-2 mt-2">Audio Codec:</label>
+                    <select
+                      value={audioCodec}
+                      onChange={(e) => setAudioCodec(e.target.value)}
+                      className="border p-2 w-full rounded mb-4"
+                    >
+                      <option value="">Default</option>
+                      <option value="aac">AAC</option>
+                      <option value="mp3">MP3</option>
+                      <option value="opus">Opus</option>
+                      <option value="ac3">AC3</option>
+                    </select>
+
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="font-semibold block mb-2">Sample Rate:</label>
+                        <select
+                          value={audioSampleRate}
+                          onChange={(e) => setAudioSampleRate(e.target.value)}
+                          className="border p-2 w-full rounded"
+                          disabled={!sourceMetadata.audioSampleRate}
+                        >
+                          {sourceMetadata.audioSampleRate > 0 && (
+                            <option value={sourceMetadata.audioSampleRate.toString()}>
+                              {sourceMetadata.audioSampleRate >= 1000 
+                                ? `${(sourceMetadata.audioSampleRate / 1000).toFixed(1)}` 
+                                : sourceMetadata.audioSampleRate.toString()} kHz (Source)
+                            </option>
+                          )}
+                          <option value="44100">44.1 kHz</option>
+                          <option value="48000">48 kHz</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="font-semibold block mb-2">Channels:</label>
+                        <select
+                          value={audioChannels}
+                          onChange={(e) => setAudioChannels(e.target.value)}
+                          className="border p-2 w-full rounded"
+                          disabled={!sourceMetadata.audioChannels}
+                        >
+                          {sourceMetadata.audioChannels > 0 && (
+                            <option value={sourceMetadata.audioChannels.toString()}>
+                              {sourceMetadata.audioChannels === 1 ? 'Mono' : 
+                               sourceMetadata.audioChannels === 2 ? 'Stereo' : 
+                               `${sourceMetadata.audioChannels} channels`} (Source)
+                            </option>
+                          )}
+                          <option value="1">Mono</option>
+                          <option value="2">Stereo</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Bitrate Settings */}
+              <div className="mb-4">
+                <label className="font-semibold block mb-2">Video Bitrate (kbps):</label>
                 <input
                   type="number"
-                  value={audioBitrate}
-                  onChange={(e) => setAudioBitrate(e.target.value)}
-                  placeholder="e.g., 128"
+                  value={videoBitrate}
+                  onChange={(e) => setVideoBitrate(e.target.value)}
+                  placeholder="e.g., 2000"
                   className="border p-2 w-full rounded"
                   min="0"
                 />
-                {audioBitrate && <p className="text-sm text-gray-500 mt-1">Audio bitrate: {audioBitrate} kbps</p>}
+                {videoBitrate && <p className="text-sm text-gray-500 mt-1">Video bitrate: {videoBitrate} kbps</p>}
               </div>
-            )}
-          </div>
 
-          <button 
-          type="submit"
-          disabled={!targetFormat}
-          className="mt-4 bg-blue-200 p-2 rounded-xl hover:scale-105 duration-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Convert
-          </button>
-        </div>
-      </form>
-      
+              {!noAudio && (
+                <div className="mb-4">
+                  <label className="font-semibold block mb-2">Audio Bitrate (kbps):</label>
+                  <input
+                    type="number"
+                    value={audioBitrate}
+                    onChange={(e) => setAudioBitrate(e.target.value)}
+                    placeholder="e.g., 128"
+                    className="border p-2 w-full rounded"
+                    min="0"
+                  />
+                  {audioBitrate && <p className="text-sm text-gray-500 mt-1">Audio bitrate: {audioBitrate} kbps</p>}
+                </div>
+              )}
+            </div>
+
+            <button 
+            type="submit"
+            disabled={!targetFormat}
+            className="mt-4 bg-blue-200 p-2 rounded-xl hover:scale-105 duration-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Convert
+            </button>
+          </div>
+        </form>
         
-        {/* video converted url */}
-        {convertedFileUrl && (
-        <div style={{ marginTop: "20px" }}>
-          <h4>Converted Video:</h4>
-          <a href={convertedFileUrl} target="_blank" rel="noopener noreferrer">
-            Download
-          </a>
-          <video
-            src={convertedFileUrl}
-            controls
-            style={{ display: "block", marginTop: "10px", maxWidth: "100%" }}
-          />
-        </div>
-      )}
-    </div>
+          
+          {/* video converted url */}
+          {convertedFileUrl && (
+          <div style={{ marginTop: "20px" }}>
+            <h4>Converted Video:</h4>
+            <a href={convertedFileUrl} target="_blank" rel="noopener noreferrer">
+              Download
+            </a>
+            <video
+              src={convertedFileUrl}
+              controls
+              style={{ display: "block", marginTop: "10px", maxWidth: "100%" }}
+            />
+          </div>
+        )}
+      </div>
+    </>
+  )
 }   
