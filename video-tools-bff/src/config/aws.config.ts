@@ -29,12 +29,25 @@ export class AWSConfig {
         this.permanent_bucket_name = this.configService.get<string>('AWS_S3_BUCKET') as string
     }
 
+    private sanitizeS3Metadata(metadata: any): Record<string, string> {
+        const sanitized: Record<string, string> = {};
+        if (!metadata) return sanitized;
+        Object.entries(metadata).forEach(([key, value]) => {
+            if (value === null || value === undefined) return;
+            sanitized[key.toLowerCase()] = typeof value === 'string'
+                ? value
+                : JSON.stringify(value);
+        });
+        return sanitized;
+    }
+
     async getUploadUrlV2(key: string, contentType: any, metadata: any, expiresIn=3600): Promise<string> {
+        const sanitizedMetadata = this.sanitizeS3Metadata(metadata);
         const params: AWS.S3.Types.PutObjectRequest = {
             Bucket: this.temp_bucket_name,
             Key: key,
             ContentType: contentType,
-            Metadata: metadata
+            Metadata: sanitizedMetadata
         };
         return await this.s3v2.getSignedUrlPromise('putObject', { ...params, Expires: expiresIn });
     }

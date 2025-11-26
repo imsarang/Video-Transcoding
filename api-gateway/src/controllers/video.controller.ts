@@ -3,6 +3,7 @@ import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { Logger } from "nestjs-pino";
 import { firstValueFrom } from "rxjs";
+import { RedisService } from "src/modules/redis/redis.service";
 
 const outputKeyMap: Map<string, string> = new Map();
 
@@ -13,7 +14,8 @@ export class VideoController {
 
     constructor(
         private readonly logger: Logger,
-        private readonly httpService: HttpService
+        private readonly httpService: HttpService,
+        private readonly redisService: RedisService
     ){}
     private async proxyRequest(
         method: 'get' | 'post' | 'put'| 'delete',
@@ -33,11 +35,9 @@ export class VideoController {
             });
 
             const result = await firstValueFrom(response);
+            
             this.logger.log({
-                msg: `Proxy response received`,
-                status: result.status,
-                statusText: result.statusText,
-                url: url
+                result: result.data
             });
             return result.data;
         } catch (error) {
@@ -69,6 +69,8 @@ export class VideoController {
         const uniqueKey = `${sanitizedUserId}/${timestamp}-${sanitizedFilename}`;
         body = {...body, uniqueKey: uniqueKey}
         const response = await this.proxyRequest('post', `/video/upload/pre-signed-s3-url`, body,{})
+        console.log(response);
+        
         return response
     }
 
@@ -160,15 +162,51 @@ export class VideoController {
           });
           
           try {
-            const result = await this.proxyRequest('post', `/video/convert`, message);
+            // Subscribe to the progress channel BEFORE starting conversion
+            // Use the inputKey extracted from SNS message to construct channel name
+            // This ensures it matches what video-service publishes to
+            const channel = `video-progress:${inputKey}`;
             
+            this.logger.log({
+              msg: 'Subscribing to Redis progress channel before conversion',
+              channel,
+              inputKey
+            });
+
+            // Subscribe with handler that logs all progress messages
+            await this.redisService.subscribe(channel, (message: string) => {
+              try {
+                const progressData = JSON.parse(message);
+                this.logger.log({
+                  msg: '📊 Progress update received from video-processing',
+                  channel,
+                  inputKey,
+                  progress: progressData,
+                  timestamp: new Date().toISOString()
+                });
+              } catch (e) {
+                // If message is not JSON, log as raw string
+                this.logger.log({
+                  msg: '📊 Progress update received from video-processing (raw)',
+                  channel,
+                  inputKey,
+                  message,
+                  timestamp: new Date().toISOString()
+                });
+              }
+            });
+            
+            // Now start the conversion - progress messages will be logged as they arrive
+            const result = await this.proxyRequest('post', `/video/convert`, message);
+        
             // Map input key to output key (supports multiple concurrent users/devices)
             if (result?.outputKey) {
               outputKeyMap.set(inputKey, result.outputKey);
               this.logger.log({
-                msg: 'Video conversion completed',
+                msg: 'Video conversion request completed',
                 inputKey,
-                outputKey: result.outputKey
+                outputKey: result.outputKey,
+                note: 'Progress messages continue to arrive via Redis subscription'
               });
             } else {
               this.logger.warn({
@@ -181,7 +219,9 @@ export class VideoController {
             return { 
               status: 'success', 
               inputKey, 
-              outputKey: result?.outputKey 
+              outputKey: result?.outputKey,
+              channel,
+              note: 'Listening for progress updates on Redis channel: ' + channel
             };
           } catch(e) {
             this.logger.error({

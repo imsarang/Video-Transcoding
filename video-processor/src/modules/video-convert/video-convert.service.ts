@@ -1,26 +1,32 @@
 import { Injectable } from "@nestjs/common";
-import { FfmpegConfig } from "src/config/ffmpeg.config";
 import { Logger } from "nestjs-pino";
 import AWS from 'aws-sdk';
-import { PassThrough } from "stream";
 import ffmpeg from 'fluent-ffmpeg';
-import util from 'util';
 import { createWriteStream, unlinkSync, createReadStream } from 'fs';
-import { promisify } from 'util';
-const unlinkAsync = promisify(unlinkSync);
 import { ConfigService } from "@nestjs/config";
+import { RedisService } from "src/modules/redis/redis.service";
+
+interface VideoProgress {
+  status: string;
+  percent: number;
+  message: string;
+  error?: string;
+  outputKey?: string;
+  job: string;
+}
 
 @Injectable()
 export class ConvertService {
-    private s3: AWS.S3
+    private s3: AWS.S3;
     private readonly MAX_S3_RETRIES = 3;
     private readonly RETRY_BACKOFF_MS = 2000;
-
     constructor(
         private readonly logger: Logger,
-        private readonly ffmpegConfig: FfmpegConfig,
-        private readonly configService: ConfigService
-    ){}
+        private readonly configService: ConfigService,
+        private readonly redisService: RedisService
+    ){
+        this.logger.log('ConvertService initialized');
+    }
 
     async createInputStreamWithRetry(inputBucket: string, inputKey: string, attempt = 1): Promise<NodeJS.ReadableStream> {
         this.logger.log(`[VideoConvert] Fetching S3 input stream (attempt ${attempt})`);
@@ -86,26 +92,47 @@ export class ConvertService {
 
     async convertVideoFormat(job: any) {
         const { inputBucket, inputKey, targetformat, metadata = {} } = job;
-        console.log('Converting video:', job);
+        const progressChannel = `video-progress:${inputKey}`;
+        this.logger.log(`[VideoConvert] Progress channel: ${progressChannel}`);
+        const publishProgress = async (progress: VideoProgress) => {
+            await this.redisService.publish(progressChannel, JSON.stringify(progress));
+        };
+
+        let progressData: VideoProgress = { status: 'started', percent: 0, message: 'Job started', job: 'video-convert' };
+        this.logger.log(`[VideoConvert] Progress data: ${JSON.stringify(progressData)}`);
+        await publishProgress(progressData);
+
         this.s3 = new AWS.S3({ region: process.env.AWS_REGION });
 
-        // Use sanitized inputKey as tmp file base (replace slashes with underscores)
+        // Use sanitized inputKey as tmp file base
         const ext = (inputKey.split('.').pop() || 'mp4');
         const targetExt = targetformat || metadata.targetformat || 'mp4';
-        const baseFile = inputKey.replace(/\//g, '_'); // make valid filename
+        const baseFile = inputKey.replace(/\//g, '_');
         const inputTmpPath = `/tmp/${baseFile}`;
         const outputTmpPath = `/tmp/${baseFile}-output.${targetExt}`;
 
         // Download from S3 to local tmp file
-        const s3Object = this.s3.getObject({ Bucket: inputBucket, Key: inputKey });
-        const inputStream = s3Object.createReadStream();
-        const outputFile = createWriteStream(inputTmpPath);
-        await new Promise<void>((resolve, reject) => {
-          inputStream.pipe(outputFile)
-            .on('finish', resolve)
-            .on('error', reject);
-        });
+        try {
+            const s3Object = this.s3.getObject({ Bucket: inputBucket, Key: inputKey });
+            const inputStream = s3Object.createReadStream();
+            const outputFile = createWriteStream(inputTmpPath);
+            await new Promise<void>((resolve, reject) => {
+                inputStream.pipe(outputFile)
+                    .on('finish', resolve)
+                    .on('error', reject);
+            });
+            progressData = { ... progressData, status: 'downloaded', percent: 10, message: 'Downloaded input from S3' };
+            await publishProgress(progressData);
+        } catch (err) {
+            progressData = { ...progressData, status: 'error', percent: 0, message: 'Failed to download from S3', error: err.message };
+            await publishProgress(progressData);
+            throw err;
+        }
 
+        this.logger.log(progressData)
+        // FFmpeg processing block
+        let ffmpegPercent = 10;
+        let ffmpegComplete = false;
         // --- Construct ffmpeg command with robust metadata checks/defaults ---
         let ffmpegCmd = ffmpeg(inputTmpPath);
 
@@ -172,44 +199,75 @@ export class ConvertService {
         
         // --- End ffmpeg build ---
 
-        await new Promise<void>((resolve, reject) => {
-          ffmpegCmd
-            .on('end', resolve)
-            .on('error', (err, stdout, stderr) => {
-              this.logger.error('[VideoConvert] FFmpeg error', { err, stdout, stderr });
-              reject(err);
-            })
-            .save(outputTmpPath);
-        });
-
-        // Upload result
-        const outputKey = inputKey.replace(new RegExp(`\\.${ext}$`), `-converted.${targetExt}`);
-        await this.s3.upload({
-          Bucket: this.configService.get<string>('AWS_S3_BUCKET') as string,
-          Key: outputKey,
-          Body: createReadStream(outputTmpPath),
-          ContentType: `video/${targetExt}`
-        }).promise()
-        .then(() => {
-          this.logger.log('[VideoConvert] Upload complete');
-        })
-        .catch((err) => {
-          this.logger.error('[VideoConvert] Upload error', { err });
-          throw new Error('Failed to upload converted video to S3');
-        });
-
-        // Cleanup
         try {
-          unlinkSync(inputTmpPath);
-          unlinkSync(outputTmpPath);
-        } catch(e) {
-          this.logger.warn("Temp file delete failed", e);
+            await new Promise<void>((resolve, reject) => {
+                ffmpegCmd
+                    .on('start', async () => {
+                        ffmpegPercent = 15;
+                        await publishProgress({...progressData, status: 'processing', percent: ffmpegPercent, message: 'Started Video Conversion'});
+                    })
+                    .on('progress', async (progress) => {
+                        if (progress.percent) {
+                            ffmpegPercent = Math.floor(10 + progress.percent * 0.7); // scale to ~80%
+                            await publishProgress({...progressData, status: 'processing', percent: ffmpegPercent, message: `Processing (${progress.percent.toFixed(2)}%)`});
+                        }
+                    })
+                    .on('end', async () => {
+                        ffmpegPercent = 90;
+                        ffmpegComplete = true;
+                        await publishProgress({...progressData, status: 'processed', percent: ffmpegPercent, message: 'Conversion finished'});
+                        resolve();
+                    })
+                    .on('error', async (err, stdout, stderr) => {
+                        await publishProgress({...progressData, status: 'error', percent: ffmpegPercent, message: 'Video Conversion error', error: err.message});
+                        reject(err);
+                    })
+                    .save(outputTmpPath);
+            });
+        } catch (err) {
+            progressData = { ...progressData, status: 'error', percent: ffmpegPercent, message: 'Error during video processing', error: err.message };
+            await publishProgress(progressData);
+            throw err;
         }
 
-        return {
-          success: true,
-          outputKey,
-          message: 'Video converted successfully',
-        };
+        // Upload result
+        try {
+            const outputKey = inputKey.replace(new RegExp(`\\.${ext}$`), `-converted.${targetExt}`);
+            await this.s3.upload({
+                Bucket: this.configService.get<string>('AWS_S3_BUCKET') as string,
+                Key: outputKey,
+                Body: createReadStream(outputTmpPath),
+                ContentType: `video/${targetExt}`
+            }).promise()
+            .then(() => {
+                this.logger.log(`[VideoConvert] Upload complete: ${outputKey}`);
+                progressData = { ...progressData, status: 'uploaded', percent: 99, message: 'Upload complete', outputKey };
+
+            })
+            .catch((err) => {
+                this.logger.error(`[VideoConvert] Upload error: ${outputKey}`, err);
+                progressData = { ...progressData, status: 'error', percent: 99, message: 'Upload error', error: err.message };
+                throw err;
+            });
+            await publishProgress(progressData)
+            .then(()=>this.logger.log(`[VideoConvert] Upload complete: ${outputKey}`))
+            .catch((err) => this.logger.error(`[VideoConvert] Upload error: ${outputKey}`, err));
+
+            // Cleanup
+            try {
+                unlinkSync(inputTmpPath);
+                unlinkSync(outputTmpPath);
+            } catch(e) {
+                this.logger.warn("Temp file delete failed", e);
+            }
+            progressData = { ...progressData, status: 'completed', percent: 100, message: 'Job completed successfully', outputKey };
+            await publishProgress(progressData);
+
+            return { success: true, outputKey, message: 'Video converted successfully' };
+        } catch(err) {
+            progressData = { ...progressData, status: 'error', percent: ffmpegComplete ? 90 : ffmpegPercent, message: 'Upload error', error: err.message };
+            await publishProgress(progressData);
+            throw err;
+        }
     }
 }

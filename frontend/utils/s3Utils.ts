@@ -16,32 +16,14 @@ export const uploadToS3 = async (
           typeof value !== 'function' &&
           key !== "media" && key !== "s3Url"
         ) {
-          if (typeof value === "object") {
-            // Only accept if it's a primitive stringifiable type and not an array/object
-            if (Array.isArray(value) || value === null) {
-              console.warn(`Skipping metadata key ${key}: arrays or null are not allowed as S3 metadata value.`);
-              return;
-            } else {
-              // Stringify single level object if all props are strings or numbers
-              const flat = Object.entries(value).every(([k, v]) => typeof v === 'string' || typeof v === 'number');
-              if (flat) {
-                metaHeaders[`x-amz-meta-${key.toLowerCase()}`] = JSON.stringify(value);
-              } else {
-                console.warn(`Skipping metadata key ${key}: nested objects are not allowed as S3 metadata value.`);
-                return;
-              }
-            }
-          } else if(typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-            metaHeaders[`x-amz-meta-${key.toLowerCase()}`] = String(value);
-          } else {
-            console.warn(`Skipping metadata key ${key}: type not supported for S3 meta.`);
-          }
+          // S3 requires metadata key to be lowercased, no spaces
+          // Values must be string
+          metaHeaders[`x-amz-meta-${key.toLowerCase()}`] =
+            typeof value === "object" ? JSON.stringify(value) : String(value);
         }
       });
     }
 
-    console.log(preSignedUrl);
-    
     const response = await fetch(preSignedUrl, {
       method: 'PUT',
       body: file,

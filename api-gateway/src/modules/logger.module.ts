@@ -8,7 +8,11 @@ import { LoggerModule } from "nestjs-pino";
                 const base: any = {
                     pinoHttp: {
                         level: process.env.LOG_LEVEL || 'info',
-                        autoLogging: false
+                        autoLogging: false,
+                        serializers: {
+                            req: () => undefined, // Remove req object from logs
+                            request: () => undefined // Also remove request alias
+                        }
                     }
                 };
 

@@ -1,20 +1,20 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConvertController } from './modules/video-convert/video-convert.controller';
 import { ConvertModule } from './modules/video-convert/video-convert.module';
 import { LoggerModule } from 'nestjs-pino';
-import { ConvertService } from './modules/video-convert/video-convert.service';
 import { SqsConsumerService } from './modules/sqs/sqs_consumer.service';
 import { SqsConsumerModule } from './modules/sqs/sqs_consumer.module';
-import { FfmpegConfig } from './config/ffmpeg.config';
 import { ConfigService } from '@nestjs/config';
 import { ConfigModule } from '@nestjs/config';
+import { RedisModule } from './modules/redis/redis.module';
 
 @Module({
   imports: [
+    RedisModule,
     ConvertModule,
-    SqsConsumerModule,
+    // SqsConsumerModule,
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
@@ -26,7 +26,7 @@ import { ConfigModule } from '@nestjs/config';
             ignore: 'pid,hostname,req,res,responseTime',
           }
         } : undefined,
-        autoLogging: false // optionally disable auto http logs
+        autoLogging: false
       }
     }),
     ConfigModule.forRoot({
@@ -35,8 +35,16 @@ import { ConfigModule } from '@nestjs/config';
   ],
   controllers: [
     AppController,
-    ConvertController
+    ConvertController,
   ],
-  providers: [AppService, ConvertService, SqsConsumerService, FfmpegConfig, ConfigService],
+  providers: [
+    AppService,
+    SqsConsumerService,
+    ConfigService,
+  ],
 })
-export class AppModule {}
+export class AppModule implements OnModuleInit {
+  onModuleInit() {
+    console.log('AppModule initialized');
+  }
+}
