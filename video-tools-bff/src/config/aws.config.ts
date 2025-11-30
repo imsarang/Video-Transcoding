@@ -54,15 +54,11 @@ export class AWSConfig {
 
     // download the pre-signed url
     async getDownloadUrl(key: string, expiresIn=3600) {
-        const command = new GetObjectCommand({
+        const params: AWS.S3.Types.GetObjectRequest = {
             Bucket: this.permanent_bucket_name,
             Key: key
-        })
+        }
 
-        return await getSignedUrl(
-            this.s3v2 as any,
-            command,
-            {expiresIn}
-        )
+        return await this.s3v2.getSignedUrlPromise('getObject', { ...params, Expires: expiresIn });
     }
 }

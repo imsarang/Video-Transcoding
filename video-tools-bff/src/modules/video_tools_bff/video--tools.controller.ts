@@ -90,7 +90,10 @@ export class VideoToolsBffController {
         if (!key || key.trim() === '') {
             throw new BadRequestException('Query parameter "key" is required');
         }
-
+        this.logger.log({
+            msg: 'Creating download pre-signed URL',
+            key
+        });
         return await this.videoToolsService.createDownloadPreSignedUrl(key);
     }
 

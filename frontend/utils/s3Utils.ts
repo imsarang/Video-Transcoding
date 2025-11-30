@@ -1,8 +1,10 @@
 import toast from "react-hot-toast"
+import webSocketUtils from "./websocketUtils";
 
 export const uploadToS3 = async (
   file: File,
   preSignedUrl: string,
+  channelKey: string,
   metadata?: Record<string, any>
 ) => {
   try {
@@ -22,6 +24,13 @@ export const uploadToS3 = async (
             typeof value === "object" ? JSON.stringify(value) : String(value);
         }
       });
+    }
+    console.log(metadata);
+    
+    console.log(metaHeaders);
+    // start socket connection
+    if(channelKey) {
+      webSocketUtils.initializeSocket(channelKey)
     }
 
     const response = await fetch(preSignedUrl, {

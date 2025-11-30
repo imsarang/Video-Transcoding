@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { PinoLoggerModule } from './modules/logger.module';
-import { CorsModule } from './modules/cors.module';
-import { RateLimiterModule } from './modules/rate-limiter.module';
-import { AuthModule } from './modules/auth.module';
-import { UserModule } from './modules/user.module';
-import { VideoModule } from './modules/video.module';
+import { PinoLoggerModule } from './modules/logger/logger.module';
+import { CorsModule } from './modules/cors/cors.module';
+import { RateLimiterModule } from './modules/rate-limiter/rate-limiter.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { UserModule } from './modules/user/user.module';
+import { VideoModule } from './modules/video/video.module';
+import { WebSocketModule } from './modules/websocket/websocket.module';
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { VideoModule } from './modules/video.module';
     RateLimiterModule,
     AuthModule,
     UserModule,
-    VideoModule
+    VideoModule,
+    WebSocketModule,
   ],
   controllers: [AppController],
   providers: [AppService],

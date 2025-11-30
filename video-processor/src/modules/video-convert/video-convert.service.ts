@@ -91,9 +91,10 @@ export class ConvertService {
     }
 
     async convertVideoFormat(job: any) {
-        const { inputBucket, inputKey, targetformat, metadata = {} } = job;
+        const { inputBucket, inputKey, outputFormat, metadata = {} } = job;
+        this.logger.log({job})
         const progressChannel = `video-progress:${inputKey}`;
-        this.logger.log(`[VideoConvert] Progress channel: ${progressChannel}`);
+        // this.logger.log(`[VideoConvert] Progress channel: ${progressChannel} ${targetformat}`);
         const publishProgress = async (progress: VideoProgress) => {
             await this.redisService.publish(progressChannel, JSON.stringify(progress));
         };
@@ -106,7 +107,7 @@ export class ConvertService {
 
         // Use sanitized inputKey as tmp file base
         const ext = (inputKey.split('.').pop() || 'mp4');
-        const targetExt = targetformat || metadata.targetformat || 'mp4';
+        const targetExt = outputFormat || metadata.outputFormat || 'mp4';
         const baseFile = inputKey.replace(/\//g, '_');
         const inputTmpPath = `/tmp/${baseFile}`;
         const outputTmpPath = `/tmp/${baseFile}-output.${targetExt}`;
@@ -219,6 +220,7 @@ export class ConvertService {
                         resolve();
                     })
                     .on('error', async (err, stdout, stderr) => {
+                        this.logger.error(`[VideoConvert] FFmpeg error: ${err.message}`, { stdout, stderr });
                         await publishProgress({...progressData, status: 'error', percent: ffmpegPercent, message: 'Video Conversion error', error: err.message});
                         reject(err);
                     })
@@ -232,12 +234,15 @@ export class ConvertService {
 
         // Upload result
         try {
-            const outputKey = inputKey.replace(new RegExp(`\\.${ext}$`), `-converted.${targetExt}`);
+            // Always ensure outputKey has the right extension by removing any existing one and adding -converted.<targetExt>
+            const outputKey = inputKey.replace(/\.[^/.]+$/, '') + `-converted.${targetExt}`;
+            this.logger.log(`[VideoConvert] Uploading to S3: ${outputKey}`);
             await this.s3.upload({
                 Bucket: this.configService.get<string>('AWS_S3_BUCKET') as string,
                 Key: outputKey,
                 Body: createReadStream(outputTmpPath),
-                ContentType: `video/${targetExt}`
+                ContentType: `video/${targetExt}`,
+                Metadata: metadata
             }).promise()
             .then(() => {
                 this.logger.log(`[VideoConvert] Upload complete: ${outputKey}`);

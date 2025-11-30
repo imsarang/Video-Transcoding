@@ -9,7 +9,7 @@ import { RedisConfig } from '../../config/redis.config';
   exports: [RedisService],
 })
 export class RedisModule implements OnModuleInit, OnModuleDestroy {
-  constructor(private readonly redisConfig: RedisConfig) { }
+  constructor(private readonly redisConfig: RedisConfig) {}
   onModuleInit() {
     console.log('[RedisModule] Initializing Redis module');
     this.redisConfig.getClient();

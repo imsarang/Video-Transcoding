@@ -12,7 +12,9 @@ export class RedisConfig {
 
   constructor(private readonly configService: ConfigService) {
     RedisConfig.redisClient = this.newClient();
-    console.log('[RedisConfig] Redis singleton client instance created eagerly at app startup');
+    console.log(
+      '[RedisConfig] Redis singleton client instance created eagerly at app startup',
+    );
   }
 
   getHost(): string {
@@ -26,7 +28,9 @@ export class RedisConfig {
   private newClient(): Redis {
     const host = this.getHost();
     const port = this.getPort();
-    console.log(`[RedisConfig] Creating Redis client at host: ${host}, port: ${port}`);
+    console.log(
+      `[RedisConfig] Creating Redis client at host: ${host}, port: ${port}`,
+    );
     return new Redis({ host, port });
   }
 
@@ -47,7 +51,9 @@ export class RedisConfig {
     if (!RedisConfig.subscriberClient) {
       const host = this.getHost();
       const port = this.getPort();
-      console.log(`[RedisConfig] Creating Redis subscriber singleton client at host: ${host}, port: ${port}`);
+      console.log(
+        `[RedisConfig] Creating Redis subscriber singleton client at host: ${host}, port: ${port}`,
+      );
       RedisConfig.subscriberClient = new Redis({ host, port });
     }
     return RedisConfig.subscriberClient;

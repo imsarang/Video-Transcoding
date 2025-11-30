@@ -17,10 +17,13 @@ export class VideoToolsBffService {
     // create pre-signed url for storing in temp-s3 bucket
     async createUploadPreSignedUrl(key: string, contentType:any, metadata: any): Promise<string> {
         // return await this.awsConfig.getUploadUrl(key, contentType, metadata);
+        console.log('createUploadPreSignedUrl', key, contentType, metadata);
         return await this.awsConfig.getUploadUrlV2(key, contentType, metadata);
     }
 
     async createDownloadPreSignedUrl(key: string): Promise<string> {
+        console.log('createDownloadPreSignedUrl', key);
+        
         return await this.awsConfig.getDownloadUrl(key);
     }
 }

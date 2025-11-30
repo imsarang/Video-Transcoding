@@ -18,7 +18,8 @@ export const handler = async (event) => {
             Bucket: bucket, Key: key
         }))
 
-        const outputFormat = head.Metadata?.output_format || "mp4"
+        console.log(`Head object: ${JSON.stringify(head, null, 2)}`);
+        const outputFormat = head.Metadata?.targetformat || "mp4"
 
         const message = {
             inputBucket: bucket,

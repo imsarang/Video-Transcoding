@@ -1,10 +1,11 @@
 'use client'
-import React, { HTMLInputTypeAttribute, useState } from "react"
+import React, { HTMLInputTypeAttribute, useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import { BiUpload } from "react-icons/bi"
 import { api } from "../../utils/apiUtils"
 import { useRouter } from "next/navigation"
 import { uploadToS3 } from "../../utils/s3Utils"
+import webSocketUtils from "../../utils/websocketUtils"
 
 const VIDEO_FORMATS = ["mp4", "webm", "avi", "mov", "mkv"]
 
@@ -35,7 +36,11 @@ export const ConvertVideo = () => {
     const [file, setFile] = useState<File | null>(null)
     const [filename, setFilename] = useState<string>("")
     const [preSignedUrl, setPreSignedUrl] = useState<string>("")
+    const [channelKey, setChannelKey] = useState<string>("")
+    const [outputUrl, setOutputUrl] = useState<string>("")
+    const [outputMetadata, setOutputMetadata] = useState<any>({})
 
+  const [progress, setProgress] = useState(0)
     const [metadata, setMetadata] = useState({
         name: "",
         size: 0.0,
@@ -50,8 +55,37 @@ export const ConvertVideo = () => {
         audioChannels: 0
     })
     const [uploadProgress, setUploadProgress] = useState(0)
+    useEffect(() => {
+      if(channelKey){
+        webSocketUtils.onProgress((progress: any)=>{
+          if(progress.status === 'completed')
+          {
+            setProgress(0)
+            // setOutputUrl(progress.outputKey)
+            // get the file from s3 given the output key
+            api.get(`/video/download/pre-signed-s3-url?key=${progress.outputKey}`)
+            .then((res) => {
+              setOutputUrl(res.data.data)
+            })
+            .catch((err) => {
+              toast.error('Unable to get the file from s3')
+            })
+          }
+          else
+          {
+            setProgress(progress.percent)
+          }
+        })
+      }
+
+      return () => {
+        setProgress(0)
+        setChannelKey("")
+        setOutputUrl("")
+      }
+    },[channelKey])
+
     const [targetFormat, setTargetFormat] = useState("")
-    const [convertedFileUrl, setConvertedUrl] = useState(null)
     const [previewFile, setPreviewFile] = useState<string| null>(null)
     
     // Video conversion settings
@@ -79,10 +113,7 @@ export const ConvertVideo = () => {
         URL.revokeObjectURL(previewFile)
       }
       
-      console.log(selectedFile);
-      
       setFilename(selectedFile.name)
-      setConvertedUrl(null)
       setFile(selectedFile)
 
       // extract metadata
@@ -198,7 +229,7 @@ export const ConvertVideo = () => {
         }
 
         const payload: any = {
-          targetFormat,
+          targetformat: targetFormat, // <--- Required key for S3 and backend
           videoResolution: (videoWidth && videoHeight)
             ? { width: videoWidth, height: videoHeight }
             : null,
@@ -212,6 +243,7 @@ export const ConvertVideo = () => {
           audioBitrate: noAudio ? null : (audioBitrate && !isNaN(parseInt(audioBitrate)) ? `${audioBitrate}k` : null),
           job:"convert"
         };
+
         
         // remove nulls
         Object.keys(payload).forEach(key => {
@@ -220,12 +252,13 @@ export const ConvertVideo = () => {
           }
         });
         
-        await getUploadPreSignedUrl(file as File, payload)
+        await uploadToAWSs3(file as File, payload)
+        // await getUploadPreSignedUrl(file as File, payload)
 
         // upload the actual media file to s3 with metadata
         if (!file) throw new Error('No file selected')
         setUploading(true)
-        await uploadToS3(file, preSignedUrl, payload); // file from state
+        await uploadToS3(file, preSignedUrl, channelKey, payload); // file from state
         setUploading(false)
         
         // remove the file from payload before sending metadata downstream
@@ -239,7 +272,7 @@ export const ConvertVideo = () => {
       }
     }
 
-    const getUploadPreSignedUrl = async(file: File, metadata: any) => {
+    const uploadToAWSs3 = async(file: File, metadata: any) => {
       try
       {
         const response = await api.post(`/video/upload/pre-signed-s3-url`, {
@@ -247,9 +280,11 @@ export const ConvertVideo = () => {
           metadata: metadata,
           contentType: file.type
         })
-        // console.log(response.data.data)
         
         setPreSignedUrl(response.data.data.url || 's3-pre-signed-url')
+        setChannelKey(`${response.data.data.key}.${targetFormat}`)
+
+        await uploadToS3(file, response.data.data.url, response.data.data.key, metadata)
       }
       catch(err)
       {
@@ -270,6 +305,20 @@ export const ConvertVideo = () => {
             </div>
           </div>
         )}
+        {progress > 0 && progress < 100 && !outputUrl && (
+  <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center">
+    <div className="bg-white rounded-xl px-8 py-6 shadow-lg flex flex-col items-center">
+      <span className="mb-2 text-xl font-bold text-blue-700">Processing Video...</span>
+      <div className="relative w-64 h-6 bg-gray-200 rounded-full overflow-hidden mb-2">
+        <div
+          className="absolute left-0 top-0 h-6 bg-blue-500 rounded-full transition-all"
+          style={{ width: `${progress}%` }}
+        ></div>
+      </div>
+      <span className="font-mono">{progress}%</span>
+    </div>
+  </div>
+)}
         <div className={uploading ? "blur-sm grayscale pointer-events-none select-none" : "w-full"}>
           <div className="m-4 rounded-xl p-4 bg-white w-full">
 
@@ -547,19 +596,23 @@ export const ConvertVideo = () => {
       
         
         {/* video converted url */}
-        {convertedFileUrl && (
-        <div style={{ marginTop: "20px" }}>
-          <h4>Converted Video:</h4>
-          <a href={convertedFileUrl} target="_blank" rel="noopener noreferrer">
-            Download
-          </a>
-          <video
-            src={convertedFileUrl}
-            controls
-            style={{ display: "block", marginTop: "10px", maxWidth: "100%" }}
-          />
-        </div>
-      )}
+        {outputUrl && (() => {
+  const urlWithoutQuery = outputUrl.split('?')[0];
+  const filename = urlWithoutQuery.split('/').pop() || 'output-video.mp4';
+  return (
+    <div style={{ marginTop: '20px' }}>
+      <h4>Converted Video:</h4>
+      <a
+        href={outputUrl}
+        download={filename}
+        className="inline-flex items-center px-4 py-2 bg-blue-600 rounded text-white font-bold hover:bg-blue-800 transition"
+        style={{ marginBottom: 12 }}
+      >
+        Download Video
+      </a>
+    </div>
+  );
+})()}
     </div>
     </div>
     </>

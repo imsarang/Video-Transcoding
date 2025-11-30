@@ -4,25 +4,30 @@ import { Logger } from 'nestjs-pino';
 import { LoggingInterceptor } from './interceptors/logging.interceptor';
 import { ResponseInterceptor } from './interceptors/response.interceptor';
 import { GlobalHttpExceptionFilter } from './interceptors/globalExceptionFilter.interceptor';
-import cookieParser from 'cookie-parser'
+import { IoAdapter } from '@nestjs/platform-socket.io';
+import cookieParser from 'cookie-parser';
 import bodyParser from 'body-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
-    bufferLogs: true // enabled boot time logs
+    bufferLogs: true, // enabled boot time logs
   });
 
-  app.useLogger(app.get(Logger)) // use pino as Nest logger
+  // Configure WebSocket adapter with CORS
+  const ioAdapter = new IoAdapter(app);
+  app.useWebSocketAdapter(ioAdapter);
+
+  app.useLogger(app.get(Logger)); // use pino as Nest logger
   app.useGlobalInterceptors(
     new LoggingInterceptor(app.get(Logger)),
-    new ResponseInterceptor()
+    new ResponseInterceptor(),
   ); // apply logging interceptor globally
 
-  app.useGlobalFilters(new GlobalHttpExceptionFilter())
+  app.useGlobalFilters(new GlobalHttpExceptionFilter());
 
-  app.use(cookieParser())
-  app.use(bodyParser.json())
-  app.use(bodyParser.text({ type: 'text/plain' }))
+  app.use(cookieParser());
+  app.use(bodyParser.json());
+  app.use(bodyParser.text({ type: 'text/plain' }));
   await app.listen(process.env.PORT ?? 3001);
 }
 bootstrap();

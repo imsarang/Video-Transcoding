@@ -120,12 +120,12 @@ resource "aws_s3_bucket_cors_configuration" "temp_bucket_video_cors"{
             "x-amz-meta-framerate",
             "x-amz-meta-job",
             "x-amz-meta-noaudio",
-            "x-amz-meta-targetFormat",
+            "x-amz-meta-targetformat",
             "x-amz-meta-videoresolution",
             "x-amz-meta-videocodec",
             "x-amz-meta-audiobitrate",
             "x-amz-meta-videobitrate",
-            "x-amz-meta-audiocodec"
+            "x-amz-meta-audiocodec",
             ]
         max_age_seconds = 3000
     }

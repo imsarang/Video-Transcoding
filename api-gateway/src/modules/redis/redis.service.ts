@@ -7,24 +7,25 @@ import Redis from 'ioredis';
 export class RedisService implements OnModuleDestroy, OnModuleInit {
   private redisClient: Redis;
   private subscriber: Redis;
-  private readonly channelHandlers: Map<string, (message: string) => void> = new Map();
+  private readonly channelHandlers: Map<string, (message: string) => void> =
+    new Map();
 
   constructor(
     private readonly redisConfig: RedisConfig,
-    private readonly logger: Logger
+    private readonly logger: Logger,
   ) {}
 
   onModuleInit() {
     // Regular Redis client singleton for commands (get, set, publish)
     this.redisClient = this.redisConfig.getClient();
-    
+
     // Subscriber client singleton for pub/sub operations
     // Redis protocol requires separate client instances:
     // - Regular client: can execute commands but cannot subscribe
     // - Subscriber client: can subscribe but cannot execute regular commands
     // Both are singletons managed by RedisConfig
     this.subscriber = this.redisConfig.getSubscriberClient();
-    
+
     // Set up message handler for all subscribed channels
     this.subscriber.on('message', (channel: string, message: string) => {
       const handler = this.channelHandlers.get(channel);
@@ -37,7 +38,7 @@ export class RedisService implements OnModuleDestroy, OnModuleInit {
     this.subscriber.on('subscribe', (channel: string) => {
       this.logger.log({
         msg: 'Subscribed to Redis channel',
-        channel
+        channel,
       });
     });
 
@@ -45,14 +46,14 @@ export class RedisService implements OnModuleDestroy, OnModuleInit {
       this.logger.error({
         msg: 'Redis subscriber error',
         error: error.message,
-        stack: error.stack
+        stack: error.stack,
       });
     });
 
     this.logger.log({
       msg: 'RedisService initialized',
       host: this.redisClient.options.host,
-      port: this.redisClient.options.port
+      port: this.redisClient.options.port,
     });
   }
 
@@ -68,23 +69,26 @@ export class RedisService implements OnModuleDestroy, OnModuleInit {
     return this.redisClient.publish(channel, message);
   }
 
-  async subscribe(channel: string, handler: (message: string) => void): Promise<void> {
+  async subscribe(
+    channel: string,
+    handler: (message: string) => void,
+  ): Promise<void> {
     try {
       // Store handler for this channel
       this.channelHandlers.set(channel, handler);
-      
+
       // Subscribe to channel (channels are unique per conversion)
       await this.subscriber.subscribe(channel);
-      
+
       this.logger.log({
         msg: 'Successfully subscribed to channel',
-        channel
+        channel,
       });
     } catch (error) {
       this.logger.error({
         msg: 'Failed to subscribe to channel',
         channel,
-        error: error.message
+        error: error.message,
       });
       throw error;
     }
@@ -94,16 +98,16 @@ export class RedisService implements OnModuleDestroy, OnModuleInit {
     try {
       await this.subscriber.unsubscribe(channel);
       this.channelHandlers.delete(channel);
-      
+
       this.logger.log({
         msg: 'Unsubscribed from channel',
-        channel
+        channel,
       });
     } catch (error) {
       this.logger.error({
         msg: 'Failed to unsubscribe from channel',
         channel,
-        error: error.message
+        error: error.message,
       });
     }
   }
